@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Variance Lab（生成AIのぶれを統計で見る）</title>
+  <title>Variance Lab（ぶれ実験）</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 980px; margin: 24px auto; padding: 0 16px; }
     textarea { width: 100%; height: 110px; }
@@ -19,31 +19,22 @@
 </head>
 <body>
   <h1>Variance Lab（生成AIのぶれを統計で見る）</h1>
-  <p class="muted">
-    同じ指示をN回サンプリングして、ユニーク率・制約違反率などを集計する。
-    「統計的予測だから0/1が揺れる」を体験で理解するための授業用ツール。
-  </p>
+  <p class="muted">同じ指示をN回サンプリングして、ぶれ（確率的予測）を数値化する。</p>
 
   <div class="card">
-    <div class="row">
-      <label>API Key:
-        <input id="key" type="password" placeholder="授業専用キーを入力" size="46" autocomplete="off">
-      </label>
-    </div>
-
     <label>お題（プロンプト）</label>
     <textarea id="prompt">次の文章を20字で要約して：「生成AIは統計的予測であり、出力にはぶれがある。」</textarea>
 
     <div class="row">
       <label>N回: <input id="n" type="number" min="1" max="10" value="8"></label>
       <label>文字数上限: <input id="limit" type="number" min="5" max="200" value="20"></label>
-      <label>max_output_tokens: <input id="mot" type="number" min="20" max="200" value="90"></label>
+      <label>max_output_tokens: <input id="mot" type="number" min="20" max="160" value="90"></label>
       <button id="run">実行</button>
       <span id="status" class="muted"></span>
     </div>
 
     <div class="muted">
-      ヒント：Nを増やすほど統計が安定するがコストも増える。授業では <code>N=5〜10</code> 推奨。
+      Workers側で <code>N<=10</code>, <code>max_output_tokens<=160</code> を強制してる（暴発防止）。
     </div>
   </div>
 
@@ -58,12 +49,12 @@
   </div>
 
 <script>
+  // ★ここだけ自分のWorker URLに変更
+  const WORKER_URL = "muddy-wave-7c5c.marbo0805.workers.dev";
+
   const $ = (id) => document.getElementById(id);
 
-  function charLenJP(s) {
-    // 簡易：サロゲートを考慮してコードポイント数で数える
-    return Array.from(s).length;
-  }
+  function charLenJP(s) { return Array.from(s).length; }
 
   function calcStats(texts, limit) {
     const cleaned = texts.map(t => (t ?? "").trim());
@@ -72,13 +63,10 @@
     const avgLen = lens.reduce((a,b)=>a+b,0) / Math.max(1, lens.length);
     const violations = lens.filter(l => l > limit).length;
 
-    // “一致”のざっくり指標：最頻出（mode）の出力がどれくらい占めるか
     const freq = new Map();
     for (const t of cleaned) freq.set(t, (freq.get(t) ?? 0) + 1);
     let modeCount = 0, modeText = "";
-    for (const [t,c] of freq.entries()) {
-      if (c > modeCount) { modeCount = c; modeText = t; }
-    }
+    for (const [t,c] of freq.entries()) if (c > modeCount) { modeCount = c; modeText = t; }
 
     return {
       n: cleaned.length,
@@ -93,26 +81,14 @@
     };
   }
 
-  async function callOpenAI({ apiKey, prompt, maxOutputTokens }) {
-    const res = await fetch("https://api.openai.com/v1/responses", {
+  async function sampleMany({ prompt, n, max_output_tokens }) {
+    const res = await fetch(`${WORKER_URL}/sample`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        input: prompt,
-        max_output_tokens: maxOutputTokens
-      })
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, n, max_output_tokens }),
     });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text);
-    }
-    const data = await res.json();
-    return data.output_text ?? "";
+    if (!res.ok) throw new Error(await res.text());
+    return await res.json(); // { outputs: [...] }
   }
 
   function renderOutputs(list) {
@@ -123,26 +99,18 @@
       div.style.borderTop = "1px dashed #ddd";
       div.style.paddingTop = "8px";
       div.style.marginTop = "8px";
-      div.textContent = `#${i+1}（${charLenJP(t.trim())}字）\n${t.trim()}`;
+      div.textContent = `#${i+1}（${charLenJP(t)}字）\n${t}`;
       root.appendChild(div);
     });
   }
 
   $("run").addEventListener("click", async () => {
-    const apiKey = $("key").value.trim();
     const prompt = $("prompt").value.trim();
     const n = Math.min(10, Math.max(1, parseInt($("n").value, 10) || 1));
     const limit = Math.max(1, parseInt($("limit").value, 10) || 20);
-    const mot = Math.min(200, Math.max(20, parseInt($("mot").value, 10) || 90));
+    const mot = Math.min(160, Math.max(20, parseInt($("mot").value, 10) || 90));
 
-    if (!apiKey.startsWith("sk-")) {
-      $("summary").textContent = "APIキーが未入力っぽい。授業専用キーを入れてね。";
-      return;
-    }
-    if (!prompt) {
-      $("summary").textContent = "プロンプトが空です。";
-      return;
-    }
+    if (!prompt) { $("summary").textContent = "プロンプトが空です。"; return; }
 
     $("run").disabled = true;
     $("status").textContent = "実行中...";
@@ -150,16 +118,10 @@
     $("summary").textContent = "";
 
     try {
-      const outs = [];
-      for (let i = 0; i < n; i++) {
-        $("status").textContent = `実行中... ${i+1}/${n}`;
-        const out = await callOpenAI({ apiKey, prompt, maxOutputTokens: mot });
-        outs.push(out);
-      }
+      const { outputs } = await sampleMany({ prompt, n, max_output_tokens: mot });
+      renderOutputs(outputs);
 
-      renderOutputs(outs);
-
-      const s = calcStats(outs, limit);
+      const s = calcStats(outputs, limit);
       $("summary").textContent =
         `N=${s.n}\n` +
         `ユニーク数=${s.unique}（ユニーク率=${(s.uniqueRate*100).toFixed(1)}%）\n` +
@@ -167,16 +129,14 @@
         `文字数上限${limit}字 超過=${s.violations}（${(s.violationRate*100).toFixed(1)}%）\n` +
         `最頻出（mode）=${s.modeCount}回（mode率=${(s.modeRate*100).toFixed(1)}%）\n` +
         `mode例：「${s.modeText}」\n\n` +
-        `考察：Nやお題を変えると、ユニーク率/違反率/mode率はどう変わる？\n` +
-        `→ “確率的予測”の性質が数字で見える。`;
+        `考察：プロンプトを具体化すると、違反率やmode率はどう変わる？`;
 
       $("status").textContent = "完了";
     } catch (e) {
       $("status").textContent = "エラー";
       $("summary").textContent = String(e);
     } finally {
-      // 連打防止：少し待ってからボタン復帰
-      setTimeout(() => { $("run").disabled = false; }, 1500);
+      setTimeout(() => { $("run").disabled = false; }, 800);
     }
   });
 </script>
