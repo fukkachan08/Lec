@@ -25,18 +25,25 @@ export default {
 
     const prompt = String(body.prompt ?? "").trim();
     const nRaw = Number(body.n ?? 5);
-    const maxOutRaw = Number(body.max_output_tokens ?? 90);
+    const mode = String(body.mode ?? "summary");
     const tempRaw = Number(body.temperature ?? 1.0);
 
     if (!prompt) {
       return new Response("prompt is required", { status: 400, headers: corsHeaders });
     }
 
+    // モード別のmax_tokens設定
+    const MODE_TOKENS = {
+      summary: 60,
+      yesno: 10,
+      association: 20,
+      synonym: 20
+    };
+    const max_tokens = MODE_TOKENS[mode] ?? 60;
+
     // ガード（授業用に暴発防止）
     const N_MAX = 10;
-    const TOK_MAX = 160;
     const n = Math.min(N_MAX, Math.max(1, Number.isFinite(nRaw) ? Math.floor(nRaw) : 5));
-    const max_output_tokens = Math.min(TOK_MAX, Math.max(20, Number.isFinite(maxOutRaw) ? Math.floor(maxOutRaw) : 90));
     const temperature = Math.min(2.0, Math.max(0.0, Number.isFinite(tempRaw) ? tempRaw : 1.0));
 
     const outputs = [];
@@ -50,7 +57,7 @@ export default {
         body: JSON.stringify({
           model: "gpt-4o-mini",
           messages: [{ role: "user", content: prompt }],
-          max_tokens: max_output_tokens,
+          max_tokens: max_tokens,
           temperature: temperature,
         }),
       });
