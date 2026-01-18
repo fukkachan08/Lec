@@ -12,11 +12,29 @@
     .card { background: #fff; border-radius: 16px; padding: 24px; margin: 16px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
     .card h2 { margin: 0 0 16px 0; font-size: 18px; color: #333; }
 
-    /* モード選択 */
-    .modes { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
-    .mode-option { display: flex; align-items: center; gap: 6px; }
-    .mode-option input[type="radio"] { width: 18px; height: 18px; cursor: pointer; }
-    .mode-option label { cursor: pointer; font-size: 15px; }
+    /* モード選択（カード型） */
+    .modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .mode-option { position: relative; }
+    .mode-option input[type="radio"] { position: absolute; opacity: 0; width: 0; height: 0; }
+    .mode-option label {
+      display: block;
+      padding: 16px 12px;
+      text-align: center;
+      border: 2px solid #ddd;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: 500;
+      background: #fff;
+      transition: all 0.2s;
+    }
+    .mode-option label:hover { border-color: #4a90e2; background: #f8fbff; }
+    .mode-option input[type="radio"]:checked + label {
+      border-color: #4a90e2;
+      background: #4a90e2;
+      color: white;
+      box-shadow: 0 2px 8px rgba(74, 144, 226, 0.3);
+    }
 
     /* 指示文表示 */
     .instruction { background: #f0f7ff; border-left: 4px solid #4a90e2; padding: 12px 16px; margin: 16px 0; border-radius: 6px; color: #333; font-size: 15px; }
@@ -44,7 +62,24 @@
     .run-btn:hover { background: #3a7bc8; }
     .run-btn:disabled { opacity: 0.6; cursor: not-allowed; background: #999; }
 
-    .status { text-align: center; margin-top: 12px; color: #666; font-size: 14px; }
+    .status { text-align: center; margin-top: 12px; color: #666; font-size: 14px; min-height: 24px; }
+
+    /* ローディングスピナー */
+    .spinner-container { display: none; justify-content: center; align-items: center; gap: 10px; margin-top: 16px; }
+    .spinner-container.active { display: flex; }
+    .spinner {
+      width: 24px;
+      height: 24px;
+      border: 3px solid #e0e0e0;
+      border-top: 3px solid #4a90e2;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .spinner-text { color: #4a90e2; font-weight: 500; }
 
     /* 結果表示 */
     .out { white-space: pre-wrap; line-height: 1.6; color: #333; }
@@ -65,19 +100,19 @@
     <div class="modes">
       <div class="mode-option">
         <input type="radio" id="mode-summary" name="mode" value="summary" checked>
-        <label for="mode-summary">要約</label>
+        <label for="mode-summary">📝 要約</label>
       </div>
       <div class="mode-option">
         <input type="radio" id="mode-yesno" name="mode" value="yesno">
-        <label for="mode-yesno">Yes/No判定</label>
+        <label for="mode-yesno">✓ Yes/No判定</label>
       </div>
       <div class="mode-option">
         <input type="radio" id="mode-association" name="mode" value="association">
-        <label for="mode-association">連想語</label>
+        <label for="mode-association">💭 連想語</label>
       </div>
       <div class="mode-option">
         <input type="radio" id="mode-synonym" name="mode" value="synonym">
-        <label for="mode-synonym">同義語生成</label>
+        <label for="mode-synonym">📖 同義語</label>
       </div>
     </div>
 
@@ -103,6 +138,10 @@
     </div>
 
     <button id="run" class="run-btn">実験スタート</button>
+    <div id="spinner" class="spinner-container">
+      <div class="spinner"></div>
+      <span class="spinner-text" id="spinner-text">サーバーに接続中...</span>
+    </div>
     <div id="status" class="status"></div>
   </div>
 
@@ -254,11 +293,20 @@
     }
 
     $("run").disabled = true;
-    $("status").textContent = "実行中...";
+    $("spinner").classList.add("active");
+    $("spinner-text").textContent = "サーバーに接続中...";
+    $("status").textContent = "";
     $("summary").textContent = "";
     $("outputs").textContent = "";
 
     try {
+      // 接続確認後のメッセージ変更
+      setTimeout(() => {
+        if ($("spinner").classList.contains("active")) {
+          $("spinner-text").textContent = `AIが${n}回考え中...`;
+        }
+      }, 500);
+
       const { outputs } = await sampleMany({ prompt, n, mode, temperature: temp });
       renderOutputs(outputs);
 
@@ -280,9 +328,11 @@
         `【平均文字数】${s.avgLen.toFixed(1)}字\n\n` +
         `【最も多く出た答え】${s.modeCount}回（${(s.modeRate*100).toFixed(1)}%）\n` +
         `  「${s.modeText}」`;
-      $("status").textContent = "完了";
+      $("spinner").classList.remove("active");
+      $("status").textContent = "✓ 完了";
     } catch (e) {
-      $("status").textContent = "エラー";
+      $("spinner").classList.remove("active");
+      $("status").textContent = "✗ エラー";
       $("summary").textContent = String(e);
     } finally {
       setTimeout(() => { $("run").disabled = false; }, 800);
