@@ -26,6 +26,7 @@ export default {
     const prompt = String(body.prompt ?? "").trim();
     const nRaw = Number(body.n ?? 5);
     const maxOutRaw = Number(body.max_output_tokens ?? 90);
+    const tempRaw = Number(body.temperature ?? 1.0);
 
     if (!prompt) {
       return new Response("prompt is required", { status: 400, headers: corsHeaders });
@@ -36,10 +37,11 @@ export default {
     const TOK_MAX = 160;
     const n = Math.min(N_MAX, Math.max(1, Number.isFinite(nRaw) ? Math.floor(nRaw) : 5));
     const max_output_tokens = Math.min(TOK_MAX, Math.max(20, Number.isFinite(maxOutRaw) ? Math.floor(maxOutRaw) : 90));
+    const temperature = Math.min(2.0, Math.max(0.0, Number.isFinite(tempRaw) ? tempRaw : 1.0));
 
     const outputs = [];
     for (let i = 0; i < n; i++) {
-      const r = await fetch("https://api.openai.com/v1/responses", {
+      const r = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -47,8 +49,9 @@ export default {
         },
         body: JSON.stringify({
           model: "gpt-4o-mini",
-          input: prompt,
-          max_output_tokens,
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: max_output_tokens,
+          temperature: temperature,
         }),
       });
 
@@ -58,7 +61,8 @@ export default {
       }
 
       const data = await r.json();
-      outputs.push((data.output_text ?? "").trim());
+      const content = data.choices?.[0]?.message?.content ?? "";
+      outputs.push(content.trim());
     }
 
     return new Response(JSON.stringify({ outputs }), {

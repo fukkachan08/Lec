@@ -27,10 +27,11 @@
       <label>N回: <input id="n" type="number" min="1" max="10" value="8"></label>
       <label>文字数上限: <input id="limit" type="number" min="5" max="200" value="20"></label>
       <label>max_output_tokens: <input id="mot" type="number" min="20" max="160" value="90"></label>
+      <label>Temperature (ぶれ): <input id="temp" type="number" min="0" max="2" step="0.1" value="1.0" style="width:70px;"></label>
       <button id="run">実行</button>
       <span id="status" class="muted"></span>
     </div>
-    <div class="muted">※ Workers側で N<=10, max_output_tokens<=160 を強制。</div>
+    <div class="muted">※ Workers側で N<=10, max_output_tokens<=160, temperature 0.0〜2.0 を強制。<br>Temperature: 0に近い=安定・一貫、高い=ランダム・多様</div>
   </div>
 
   <div class="card">
@@ -66,12 +67,12 @@
       avgLen, violations, violationRate: violations/Math.max(1,cleaned.length), modeCount, modeRate: modeCount/Math.max(1,cleaned.length), modeText };
   }
 
-  async function sampleMany({ prompt, n, max_output_tokens }) {
+  async function sampleMany({ prompt, n, max_output_tokens, temperature }) {
     const url = `${WORKER_URL}/sample`;
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, n, max_output_tokens }),
+      body: JSON.stringify({ prompt, n, max_output_tokens, temperature }),
     });
     if (!res.ok) throw new Error(await res.text());
     return await res.json();
@@ -95,6 +96,7 @@
     const n = Math.min(10, Math.max(1, parseInt($("n").value, 10) || 1));
     const limit = Math.max(1, parseInt($("limit").value, 10) || 20);
     const mot = Math.min(160, Math.max(20, parseInt($("mot").value, 10) || 90));
+    const temp = Math.min(2.0, Math.max(0.0, parseFloat($("temp").value) || 1.0));
 
     $("run").disabled = true;
     $("status").textContent = "実行中...";
@@ -102,14 +104,28 @@
     $("outputs").textContent = "";
 
     try {
-      const { outputs } = await sampleMany({ prompt, n, max_output_tokens: mot });
+      const { outputs } = await sampleMany({ prompt, n, max_output_tokens: mot, temperature: temp });
       renderOutputs(outputs);
 
       const s = calcStats(outputs, limit);
+
+      // ぶれの大きさを判定
+      let varietyMsg = "";
+      if (s.uniqueRate >= 0.9) varietyMsg = "非常に大きい（ほぼ全て違う）";
+      else if (s.uniqueRate >= 0.7) varietyMsg = "大きい（多様な出力）";
+      else if (s.uniqueRate >= 0.4) varietyMsg = "中程度（一部重複あり）";
+      else if (s.uniqueRate > 0) varietyMsg = "小さい（同じ出力が多い）";
+      else varietyMsg = "なし（全て同じ）";
+
       $("summary").textContent =
-        `N=${s.n}\nユニーク数=${s.unique}（${(s.uniqueRate*100).toFixed(1)}%）\n平均文字数=${s.avgLen.toFixed(1)}\n` +
-        `文字数上限${limit}字 超過=${s.violations}（${(s.violationRate*100).toFixed(1)}%）\n` +
-        `最頻出（mode）=${s.modeCount}回（${(s.modeRate*100).toFixed(1)}%）\nmode例：「${s.modeText}」`;
+        `【試行回数】${s.n}回\n\n` +
+        `【ぶれの大きさ】${varietyMsg}\n` +
+        `  ユニーク数: ${s.unique}/${s.n}（${(s.uniqueRate*100).toFixed(1)}%）\n` +
+        `  ※100%に近いほどぶれが大きい\n\n` +
+        `【文字数】平均 ${s.avgLen.toFixed(1)}字\n` +
+        `  上限${limit}字の超過: ${s.violations}回（${(s.violationRate*100).toFixed(1)}%）\n\n` +
+        `【最も多く出た答え】${s.modeCount}回（${(s.modeRate*100).toFixed(1)}%）\n` +
+        `  「${s.modeText}」`;
       $("status").textContent = "完了";
     } catch (e) {
       $("status").textContent = "エラー";
