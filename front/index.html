@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Variance Lab（ぶれ実験）</title>
+  <title>Variance Lab</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 980px; margin: 24px auto; padding: 0 16px; }
     textarea { width: 100%; height: 110px; }
@@ -14,12 +14,10 @@
     .out { white-space: pre-wrap; }
     button { padding: 10px 14px; border-radius: 10px; border: 1px solid #aaa; background: #fff; cursor: pointer; }
     button:disabled { opacity: 0.6; cursor: not-allowed; }
-    code { background:#f6f6f6; padding:2px 6px; border-radius:6px; }
   </style>
 </head>
 <body>
   <h1>Variance Lab（生成AIのぶれを統計で見る）</h1>
-  <p class="muted">同じ指示をN回サンプリングして、ぶれ（確率的予測）を数値化する。</p>
 
   <div class="card">
     <label>お題（プロンプト）</label>
@@ -32,10 +30,7 @@
       <button id="run">実行</button>
       <span id="status" class="muted"></span>
     </div>
-
-    <div class="muted">
-      Workers側で <code>N<=10</code>, <code>max_output_tokens<=160</code> を強制してる（暴発防止）。
-    </div>
+    <div class="muted">※ Workers側で N<=10, max_output_tokens<=160 を強制。</div>
   </div>
 
   <div class="card">
@@ -49,12 +44,11 @@
   </div>
 
 <script>
-  // ★ここだけ自分のWorker URLに変更
-  const WORKER_URL = "https://muddy-wave-7c5c.marbo0805.workers.dev";
+  // ★後でここをあなたのWorkers URLに変える（https://xxxx.workers.dev）
+  const WORKER_URL = "https://YOUR-WORKER.workers.dev";
 
   const $ = (id) => document.getElementById(id);
-
-  function charLenJP(s) { return Array.from(s).length; }
+  const charLenJP = (s) => Array.from(s).length;
 
   function calcStats(texts, limit) {
     const cleaned = texts.map(t => (t ?? "").trim());
@@ -68,27 +62,19 @@
     let modeCount = 0, modeText = "";
     for (const [t,c] of freq.entries()) if (c > modeCount) { modeCount = c; modeText = t; }
 
-    return {
-      n: cleaned.length,
-      unique: set.size,
-      uniqueRate: set.size / Math.max(1, cleaned.length),
-      avgLen,
-      violations,
-      violationRate: violations / Math.max(1, cleaned.length),
-      modeCount,
-      modeRate: modeCount / Math.max(1, cleaned.length),
-      modeText
-    };
+    return { n: cleaned.length, unique: set.size, uniqueRate: set.size/Math.max(1,cleaned.length),
+      avgLen, violations, violationRate: violations/Math.max(1,cleaned.length), modeCount, modeRate: modeCount/Math.max(1,cleaned.length), modeText };
   }
 
   async function sampleMany({ prompt, n, max_output_tokens }) {
-    const res = await fetch(`${WORKER_URL}/sample`, {
+    const url = `${WORKER_URL}/sample`;
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt, n, max_output_tokens }),
     });
     if (!res.ok) throw new Error(await res.text());
-    return await res.json(); // { outputs: [...] }
+    return await res.json();
   }
 
   function renderOutputs(list) {
@@ -110,12 +96,10 @@
     const limit = Math.max(1, parseInt($("limit").value, 10) || 20);
     const mot = Math.min(160, Math.max(20, parseInt($("mot").value, 10) || 90));
 
-    if (!prompt) { $("summary").textContent = "プロンプトが空です。"; return; }
-
     $("run").disabled = true;
     $("status").textContent = "実行中...";
-    $("outputs").textContent = "";
     $("summary").textContent = "";
+    $("outputs").textContent = "";
 
     try {
       const { outputs } = await sampleMany({ prompt, n, max_output_tokens: mot });
@@ -123,14 +107,9 @@
 
       const s = calcStats(outputs, limit);
       $("summary").textContent =
-        `N=${s.n}\n` +
-        `ユニーク数=${s.unique}（ユニーク率=${(s.uniqueRate*100).toFixed(1)}%）\n` +
-        `平均文字数=${s.avgLen.toFixed(1)}\n` +
+        `N=${s.n}\nユニーク数=${s.unique}（${(s.uniqueRate*100).toFixed(1)}%）\n平均文字数=${s.avgLen.toFixed(1)}\n` +
         `文字数上限${limit}字 超過=${s.violations}（${(s.violationRate*100).toFixed(1)}%）\n` +
-        `最頻出（mode）=${s.modeCount}回（mode率=${(s.modeRate*100).toFixed(1)}%）\n` +
-        `mode例：「${s.modeText}」\n\n` +
-        `考察：プロンプトを具体化すると、違反率やmode率はどう変わる？`;
-
+        `最頻出（mode）=${s.modeCount}回（${(s.modeRate*100).toFixed(1)}%）\nmode例：「${s.modeText}」`;
       $("status").textContent = "完了";
     } catch (e) {
       $("status").textContent = "エラー";
